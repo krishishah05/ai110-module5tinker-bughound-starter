@@ -46,3 +46,29 @@ def test_missing_return_is_penalized():
     )
     assert risk["score"] < 100
     assert any("Return" in r or "return" in r for r in risk["reasons"])
+
+
+def test_large_diff_blocks_autofix_even_on_low_severity():
+    # A fix that rewrites most of the file should not auto-apply,
+    # even if the only issue is low-severity.
+    original = "\n".join([f"x_{i} = {i}" for i in range(20)])
+    fixed = "\n".join([f"y_{i} = {i * 2}" for i in range(20)])
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Code Quality", "severity": "Low", "msg": "style"}],
+    )
+    assert risk["should_autofix"] is False
+    assert any("over-editing" in r or "changed" in r for r in risk["reasons"])
+
+
+def test_small_diff_low_severity_allows_autofix():
+    # A minimal fix on a clean file with one low-severity issue should be auto-appliable.
+    original = "import logging\n\ndef add(a, b):\n    logging.info('adding')\n    return a + b\n"
+    fixed = "import logging\n\ndef add(a, b):\n    logging.debug('adding')\n    return a + b\n"
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Code Quality", "severity": "Low", "msg": "log level"}],
+    )
+    assert risk["should_autofix"] is True

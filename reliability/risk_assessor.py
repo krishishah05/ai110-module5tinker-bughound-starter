@@ -63,6 +63,26 @@ def assess_risk(
         reasons.append("Bare except was modified, verify correctness.")
 
     # ----------------------------
+    # Large-diff signal
+    # Counts lines that changed relative to the original length.
+    # A fix that rewrites more than half the file is high-risk regardless of severity.
+    # ----------------------------
+    if original_lines:
+        import difflib
+        matcher = difflib.SequenceMatcher(None, original_lines, fixed_lines)
+        changed_lines = sum(
+            max(i2 - i1, j2 - j1)
+            for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+            if tag != "equal"
+        )
+        change_ratio = changed_lines / len(original_lines)
+        if change_ratio > 0.5:
+            score -= 25
+            reasons.append(
+                f"Fix changed ~{int(change_ratio * 100)}% of lines — may be over-editing."
+            )
+
+    # ----------------------------
     # Clamp score
     # ----------------------------
     score = max(0, min(100, score))
@@ -79,8 +99,22 @@ def assess_risk(
 
     # ----------------------------
     # Auto-fix policy
+    # Risk level alone is not enough — also require that the fix is small.
+    # A "low" risk score on a file that was 80% rewritten is still unsafe to auto-apply.
     # ----------------------------
-    should_autofix = level == "low"
+    if original_lines:
+        import difflib
+        matcher = difflib.SequenceMatcher(None, original_lines, fixed_lines)
+        changed = sum(
+            max(i2 - i1, j2 - j1)
+            for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+            if tag != "equal"
+        )
+        diff_ratio = changed / len(original_lines)
+    else:
+        diff_ratio = 0.0
+
+    should_autofix = level == "low" and diff_ratio <= 0.3
 
     if not reasons:
         reasons.append("No significant risks detected.")

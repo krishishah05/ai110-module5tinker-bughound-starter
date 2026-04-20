@@ -82,6 +82,13 @@ class BugHoundAgent:
             self._log("ANALYZE", "LLM output was not parseable JSON. Falling back to heuristics.")
             return self._heuristic_analyze(code_snippet)
 
+        # Reliability check: reject LLM output where most issues have empty messages,
+        # since empty-message issues are not actionable and indicate a degraded response.
+        empty_msg_count = sum(1 for i in issues if not i.get("msg"))
+        if issues and empty_msg_count > len(issues) // 2:
+            self._log("ANALYZE", "LLM issues had too many empty messages. Falling back to heuristics.")
+            return self._heuristic_analyze(code_snippet)
+
         return issues
 
     def propose_fix(self, code_snippet: str, issues: List[Dict[str, str]]) -> str:
