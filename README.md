@@ -1,30 +1,38 @@
 # 🐶 BugHound
 
-BugHound is a small, agent-style debugging tool. It analyzes a Python code snippet, proposes a fix, and runs basic reliability checks before deciding whether the fix is safe to apply automatically.
+BugHound is an agentic debugging assistant. It analyzes a Python code snippet, proposes a targeted fix, runs reliability checks on that fix, and decides whether the change is safe to apply automatically or should be deferred to a human reviewer.
 
 ---
 
 ## What BugHound Does
 
-Given a short Python snippet, BugHound:
+Given a short Python snippet, BugHound runs a five-step agentic loop:
 
-1. **Analyzes** the code for potential issues  
-   - Uses heuristics in offline mode  
-   - Uses Gemini when API access is enabled  
+1. **PLAN** — Logs intent and sets up the workflow
+2. **ANALYZE** — Detects issues using heuristics or Gemini (LLM)
+3. **ACT** — Proposes a fix using heuristics or Gemini
+4. **TEST** — Scores the fix for risk using `reliability/risk_assessor.py`
+5. **REFLECT** — Decides whether to recommend auto-fix or require human review
 
-2. **Proposes a fix**  
-   - Either heuristic-based or LLM-generated  
-   - Attempts minimal, behavior-preserving changes  
+---
 
-3. **Assesses risk**  
-   - Scores the fix  
-   - Flags high-risk changes  
-   - Decides whether the fix should be auto-applied or reviewed by a human  
+## Modes
 
-4. **Shows its work**  
-   - Displays detected issues  
-   - Shows a diff between original and fixed code  
-   - Logs each agent step
+| Mode | Requires API key | Analyzer | Fixer |
+|---|---|---|---|
+| Heuristic only | No | Pattern rules | Regex substitutions |
+| Gemini | Yes | Gemini LLM | Gemini LLM |
+
+In both modes, the risk assessment and auto-fix decision use the same local rules.
+
+---
+
+## Reliability Features
+
+- **LLM fallback:** If Gemini returns non-JSON or malformed output, the agent automatically falls back to heuristics and logs the reason.
+- **Empty-message guardrail:** If most issues returned by the LLM have empty `msg` fields, the response is rejected and heuristics are used instead.
+- **Large-diff penalty:** Fixes that rewrite more than 50% of the original lines are penalized in the risk score and flagged as potential over-editing.
+- **Strict auto-fix policy:** Auto-fix requires both a low risk score and fewer than 30% of lines changed — a large rewrite is blocked even if the risk score looks clean.
 
 ---
 
@@ -55,11 +63,12 @@ No API key required.
 streamlit run bughound_app.py
 ```
 
-In the sidebar, select:
+In the sidebar, select **Model mode: Heuristic only (no API)**.
 
-* **Model mode:** Heuristic only (no API)
-
-This mode uses simple pattern-based rules and is useful for testing the workflow without network access.
+Heuristic mode detects three patterns:
+- `print(` statements → Code Quality / Low
+- Bare `except:` blocks → Reliability / High
+- `TODO` comments → Maintainability / Medium
 
 ---
 
@@ -67,17 +76,17 @@ This mode uses simple pattern-based rules and is useful for testing the workflow
 
 ### 1. Set up your API key
 
-Copy the example file:
-
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and add your Gemini API key:
+Edit `.env`:
 
-```text
+```
 GEMINI_API_KEY=your_real_key_here
 ```
+
+Get a key at [aistudio.google.com/app/apikeys](https://aistudio.google.com/app/apikeys).
 
 ### 2. Run the app
 
@@ -85,25 +94,41 @@ GEMINI_API_KEY=your_real_key_here
 streamlit run bughound_app.py
 ```
 
-In the sidebar, select:
+Select **Model mode: Gemini (requires API key)** in the sidebar.
 
-* **Model mode:** Gemini (requires API key)
-* Choose a Gemini model and temperature
-
-BugHound will now use Gemini for analysis and fix generation, while still applying local reliability checks.
+> Note: The Gemini Free Tier allows ~20 requests per day. Use Heuristic mode for initial exploration to preserve your quota.
 
 ---
 
 ## Running Tests
 
-Tests focus on **reliability logic** and **agent behavior**, not the UI.
-
 ```bash
 pytest
 ```
 
-You should see tests covering:
+12 tests covering:
 
-* Risk scoring and guardrails
-* Heuristic fallbacks when LLM output is invalid
-* End-to-end agent workflow shape
+- Risk scoring and guardrails (including large-diff signal and auto-fix policy)
+- Heuristic fallback when LLM returns invalid or empty output
+- Agent workflow shape in offline mode
+- Bare except correctly blocks auto-fix via risk score
+
+---
+
+## Project Structure
+
+```
+bughound_app.py          — Streamlit UI
+bughound_agent.py        — Agentic workflow (plan → analyze → act → test → reflect)
+llm_client.py            — Gemini and MockClient wrappers
+reliability/
+  risk_assessor.py       — Risk scoring and auto-fix guardrails
+prompts/
+  analyzer_system.txt    — System prompt for issue detection
+  analyzer_user.txt      — User prompt template for analysis
+  fixer_system.txt       — System prompt for fix generation
+  fixer_user.txt         — User prompt template for fixing
+sample_code/             — Sample Python snippets to test with
+tests/                   — pytest test suite
+model_card.md            — Reflection on system behavior and failure modes
+```
